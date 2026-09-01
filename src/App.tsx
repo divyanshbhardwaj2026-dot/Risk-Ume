@@ -16,12 +16,12 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Loader2, ShieldAlert, RefreshCw, LayoutDashboard, Target, History, Settings, LogOut, CreditCard, FileText } from 'lucide-react';
+import { LinkedInTab } from '@/components/linkedin/LinkedInTab';
+import { Loader2, ShieldAlert, RefreshCw, LayoutDashboard, Target, History, Settings, LogOut, CreditCard, FileText, Linkedin } from 'lucide-react';
 
 export function MainApp() {
   const { user, logout } = useAuth();
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'risk' | 'ats' | 'builder' | 'history' | 'pricing' | 'settings'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'risk' | 'ats' | 'builder' | 'history' | 'pricing' | 'settings' | 'linkedin'>('dashboard');
   const [profile, setProfile] = useState<RiskProfile>({
     industry: '',
     role: '',
@@ -141,6 +141,13 @@ export function MainApp() {
               >
                 <Target className="w-4 h-4" />
                 ATS Optimizer
+              </button>
+              <button 
+                onClick={() => setActiveTab('linkedin')}
+                className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors flex items-center gap-2 ${activeTab === 'linkedin' ? 'bg-indigo-50 text-indigo-600' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-100'}`}
+              >
+                <Linkedin className="w-4 h-4" />
+                LinkedIn
               </button>
               <button 
                 onClick={() => setActiveTab('builder')}
@@ -340,6 +347,8 @@ export function MainApp() {
           />
         ) : activeTab === 'builder' ? (
           <ResumeBuilder />
+        ) : activeTab === 'linkedin' ? (
+          <LinkedInTab />
         ) : activeTab === 'history' ? (
           <HistoryTab onSelectAssessment={handleSelectHistoricalAssessment} />
         ) : activeTab === 'pricing' ? (

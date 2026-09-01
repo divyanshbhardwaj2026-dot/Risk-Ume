@@ -3,9 +3,9 @@ import { useAuth } from '@/lib/auth';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { ArrowRight, TrendingUp, ShieldAlert, Target, Activity, CheckCircle2, AlertCircle, FileText } from 'lucide-react';
+import { ArrowRight, TrendingUp, ShieldAlert, Target, Activity, CheckCircle2, AlertCircle, FileText, Linkedin } from 'lucide-react';
 
-export function DashboardTab({ onNavigate }: { onNavigate: (tab: 'risk' | 'ats') => void }) {
+export function DashboardTab({ onNavigate }: { onNavigate: (tab: 'risk' | 'ats' | 'linkedin') => void }) {
   const { user } = useAuth();
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -206,6 +206,22 @@ export function DashboardTab({ onNavigate }: { onNavigate: (tab: 'risk' | 'ats')
               <p className="text-xs text-gray-400 mt-4 text-center">
                 Based on ATS score, skill alignment, and role demand.
               </p>
+            </CardContent>
+          </Card>
+
+          <Card className="border-0 shadow-md bg-gradient-to-br from-[#07111F] to-[#1E3A5F] text-white">
+            <CardContent className="p-6">
+              <div className="flex justify-between items-start mb-4">
+                <div>
+                  <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                    <Linkedin className="w-5 h-5 text-[#60A5FA]" /> LinkedIn Sync
+                  </h3>
+                  <p className="text-sm text-[#94A3B8] mt-1">Connect your profile for recruiter visibility analysis.</p>
+                </div>
+              </div>
+              <Button onClick={() => onNavigate('linkedin')} className="w-full bg-[#2563EB] hover:bg-[#1D4ED8] text-white border-0">
+                Audit LinkedIn Profile <ArrowRight className="w-4 h-4 ml-2" />
+              </Button>
             </CardContent>
           </Card>
         </div>

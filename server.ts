@@ -77,6 +77,65 @@ db.exec(`
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(user_id) REFERENCES users(id)
   );
+
+  CREATE TABLE IF NOT EXISTS linkedin_imports (
+    id TEXT PRIMARY KEY,
+    user_id TEXT,
+    file_path TEXT,
+    file_name TEXT,
+    file_size INTEGER,
+    status TEXT DEFAULT 'queued',
+    progress INTEGER DEFAULT 0,
+    source TEXT DEFAULT 'pdf',
+    error_message TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(user_id) REFERENCES users(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS linkedin_profiles (
+    id TEXT PRIMARY KEY,
+    user_id TEXT,
+    import_id TEXT,
+    headline TEXT,
+    about TEXT,
+    location TEXT,
+    current_title TEXT,
+    current_company TEXT,
+    experiences TEXT,
+    education TEXT,
+    skills TEXT,
+    certifications TEXT,
+    projects TEXT,
+    raw_text TEXT,
+    source TEXT DEFAULT 'linkedin',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(user_id) REFERENCES users(id),
+    FOREIGN KEY(import_id) REFERENCES linkedin_imports(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS linkedin_audits (
+    id TEXT PRIMARY KEY,
+    user_id TEXT,
+    import_id TEXT,
+    profile_id TEXT,
+    total_score INTEGER,
+    headline_score INTEGER,
+    about_score INTEGER,
+    experience_score INTEGER,
+    skills_score INTEGER,
+    keywords_score INTEGER,
+    completeness_score INTEGER,
+    strengths TEXT,
+    weaknesses TEXT,
+    recommendations TEXT,
+    rewrites TEXT,
+    consistency_score INTEGER,
+    consistency_issues TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(user_id) REFERENCES users(id)
+  );
 `);
 
 // Self-healing migrations for rich ATS scan columns
@@ -97,7 +156,7 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use(express.json());
+  app.use(express.json({ limit: '15mb' }));
 
   // Auth Middleware
   const authenticateToken = (req: any, res: any, next: any) => {
@@ -367,6 +426,134 @@ async function startServer() {
           group: `${role}s`
         }
       });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/linkedin/upload", authenticateToken, (req: any, res) => {
+    const { fileBase64, fileName, source } = req.body;
+    const importId = crypto.randomUUID();
+    
+    try {
+      db.prepare(`
+        INSERT INTO linkedin_imports (id, user_id, file_path, file_name, file_size, status, source)
+        VALUES (?, ?, ?, ?, ?, 'queued', ?)
+      `).run(importId, req.user.id, 'base64', fileName, fileBase64.length, source || 'pdf');
+
+      res.json({ success: true, importId });
+
+      // Run async processing
+      setTimeout(async () => {
+        try {
+          // Update status to extracting
+          db.prepare("UPDATE linkedin_imports SET status = 'extracting', progress = 25 WHERE id = ?").run(importId);
+          
+          // Import dynamic module since we created a new file for the AI logic
+          const { extractLinkedInProfile, generateLinkedInAudit } = await import('./src/lib/gemini_linkedin.js');
+          
+          // 1. Extract Profile
+          const isPdf = source !== 'paste';
+          const profileData = await extractLinkedInProfile(fileBase64, isPdf);
+          
+          const profileId = crypto.randomUUID();
+          db.prepare(`
+            INSERT INTO linkedin_profiles (
+              id, user_id, import_id, headline, about, location, current_title, current_company,
+              experiences, education, skills, certifications, projects, raw_text, source
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `).run(
+            profileId, req.user.id, importId, profileData.headline, profileData.about, profileData.location,
+            profileData.current_title, profileData.current_company,
+            JSON.stringify(profileData.experiences || []), JSON.stringify(profileData.education || []),
+            JSON.stringify(profileData.skills || []), JSON.stringify(profileData.certifications || []),
+            JSON.stringify(profileData.projects || []),
+            isPdf ? 'Extracted from PDF' : fileBase64,
+            isPdf ? 'pdf' : 'paste'
+          );
+
+          // Update status to analyzing
+          db.prepare("UPDATE linkedin_imports SET status = 'analyzing', progress = 60 WHERE id = ?").run(importId);
+
+          // 2. Audit Profile
+          const auditData = await generateLinkedInAudit(profileData);
+          const auditId = crypto.randomUUID();
+          db.prepare(`
+            INSERT INTO linkedin_audits (
+              id, user_id, import_id, profile_id, total_score, headline_score, about_score,
+              experience_score, skills_score, keywords_score, completeness_score,
+              strengths, weaknesses, recommendations, rewrites
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `).run(
+            auditId, req.user.id, importId, profileId, auditData.total_score, auditData.headline_score,
+            auditData.about_score, auditData.experience_score, auditData.skills_score,
+            auditData.keywords_score, auditData.completeness_score,
+            JSON.stringify(auditData.strengths || []), JSON.stringify(auditData.weaknesses || []),
+            JSON.stringify(auditData.recommendations || []), JSON.stringify(auditData.rewrites || [])
+          );
+
+          // Update status to completed
+          db.prepare("UPDATE linkedin_imports SET status = 'completed', progress = 100 WHERE id = ?").run(importId);
+
+        } catch (error: any) {
+          console.error('LinkedIn Processing Error:', error);
+          db.prepare("UPDATE linkedin_imports SET status = 'failed', error_message = ? WHERE id = ?")
+            .run(error.message || 'Unknown error', importId);
+        }
+      }, 0);
+
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/linkedin/import/:id/status", authenticateToken, (req: any, res) => {
+    try {
+      const importRecord = db.prepare("SELECT * FROM linkedin_imports WHERE id = ? AND user_id = ?").get(req.params.id, req.user.id);
+      if (!importRecord) return res.status(404).json({ error: "Not found" });
+      res.json(importRecord);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/linkedin/profile", authenticateToken, (req: any, res) => {
+    try {
+      const profile = db.prepare("SELECT * FROM linkedin_profiles WHERE user_id = ? ORDER BY created_at DESC LIMIT 1").get(req.user.id);
+      if (!profile) return res.json(null);
+      
+      // Parse JSON arrays
+      ['experiences', 'education', 'skills', 'certifications', 'projects'].forEach(key => {
+        if (profile[key]) profile[key] = JSON.parse(profile[key]);
+      });
+      res.json(profile);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/linkedin/audit", authenticateToken, (req: any, res) => {
+    try {
+      const audit = db.prepare("SELECT * FROM linkedin_audits WHERE user_id = ? ORDER BY created_at DESC LIMIT 1").get(req.user.id);
+      if (!audit) return res.json(null);
+      
+      // Parse JSON arrays
+      ['strengths', 'weaknesses', 'recommendations', 'rewrites'].forEach(key => {
+        if (audit[key]) audit[key] = JSON.parse(audit[key]);
+      });
+      res.json(audit);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.delete("/api/linkedin/profile", authenticateToken, (req: any, res) => {
+    try {
+      // Simple cascade delete manually since we didn't use ON DELETE CASCADE
+      db.prepare("DELETE FROM linkedin_audits WHERE user_id = ?").run(req.user.id);
+      db.prepare("DELETE FROM linkedin_profiles WHERE user_id = ?").run(req.user.id);
+      db.prepare("DELETE FROM linkedin_imports WHERE user_id = ?").run(req.user.id);
+      res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }

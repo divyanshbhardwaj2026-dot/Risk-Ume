@@ -3,6 +3,7 @@ import { createServer as createViteServer } from "vite";
 import Database from "better-sqlite3";
 import path from "path";
 import { fileURLToPath } from "url";
+import { extractLinkedInProfile, generateLinkedInAudit } from "./src/lib/gemini_linkedin";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 
@@ -448,9 +449,6 @@ async function startServer() {
         try {
           // Update status to extracting
           db.prepare("UPDATE linkedin_imports SET status = 'extracting', progress = 25 WHERE id = ?").run(importId);
-          
-          // Import dynamic module since we created a new file for the AI logic
-          const { extractLinkedInProfile, generateLinkedInAudit } = await import('./src/lib/gemini_linkedin.js');
           
           // 1. Extract Profile
           const isPdf = source !== 'paste';
